@@ -4,7 +4,7 @@ export interface Meta {
   nombre: string;
   tamano: number;
   modificado: number;
-  origen: "muestra" | "subido" | "vinculado";
+  origen: "muestra" | "subido" | "vinculado" | "nube";
 }
 
 const BD = "dashboard-excel";

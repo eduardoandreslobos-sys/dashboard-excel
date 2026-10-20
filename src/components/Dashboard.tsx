@@ -8,8 +8,10 @@ import { es } from "react-day-picker/locale";
 import {
   AlertOctagon, BarChart3, Calendar as CalendarIcon, ChevronDown, Command as CmdIcon, Database, FileSpreadsheet, Filter,
   Layers, LayoutDashboard, Link2, Link2Off, Monitor, Moon, MoreHorizontal, Network, Rows3, ScanSearch, Search,
-  Sparkles, Sun, Table2, TrendingUp, Upload, X,
+  LayoutGrid, Sparkles, Sun, Table2, TrendingUp, Upload, X,
 } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { MUESTRAS, ProveedorDash, useDash, type Vista } from "./Contexto";
 import { Resumen, Tendencias, nombreMedida } from "./vistas/Resumen";
 import { Distribucion, Relaciones, Segmentos } from "./vistas/Segmentos";
@@ -39,7 +41,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { columna } from "@/lib/analisis";
 import { fechaCorta, formato, porCategoria } from "@/lib/calculo";
 import { cantidadFiltros, type Filtros } from "@/lib/hallazgos";
-import { puedeVincular } from "@/lib/archivo";
+import { puedeVincular, type Meta } from "@/lib/archivo";
+import { subirExcel } from "@/lib/nube";
+import { confirmarReemplazo, prepararReemplazo } from "@/lib/servidor/dashboards";
+import type { ConfigDashboard } from "@/lib/tipos";
+import { BarraNube } from "./nube/BarraNube";
+import { ProveedorNube, useNube, type DatosNube } from "./nube/contexto-nube";
 
 const VISTAS: { id: Vista; texto: string; icono: typeof LayoutDashboard }[] = [
   { id: "resumen", texto: "Resumen", icono: LayoutDashboard },
@@ -467,7 +474,9 @@ function BarraFiltros({ abierto, setAbierto }: { abierto: boolean; setAbierto: (
 // ---------------------------------------------------------------- Paleta de comandos
 
 function Paleta({ abierta, setAbierta, subir, prefs }: { abierta: boolean; setAbierta: (v: boolean) => void; subir: () => void; prefs: Prefs }) {
-  const { tabla, tablas, setVista, setMedida, setTabla, alternarFiltro, limpiarFiltros, filtros, vincular, cargarMuestra } = useDash();
+  const { tabla, tablas, setVista, setMedida, setTabla, alternarFiltro, limpiarFiltros, filtros, vincular, cargarMuestra, enNube, soloLectura } = useDash();
+  const nube = useNube();
+  const router = useRouter();
   const { setTema, setDensidad } = prefs;
   const ejecutar = (f: () => void) => () => {
     f();
@@ -531,9 +540,14 @@ function Paleta({ abierta, setAbierta, subir, prefs }: { abierta: boolean; setAb
             </CommandGroup>
           )}
           <CommandGroup heading="Acciones">
-            <CommandItem value="subir excel archivo" onSelect={ejecutar(subir)}><Upload aria-hidden /> Subir Excel…</CommandItem>
-            {puedeVincular() && <CommandItem value="vincular archivo local en vivo" onSelect={ejecutar(() => void vincular())}><Link2 aria-hidden /> Vincular archivo local (en vivo)</CommandItem>}
-            {MUESTRAS.map((m) => (
+            {nube?.usuario && (
+              <CommandItem value="ir a mi espacio dashboards" onSelect={ejecutar(() => router.push("/dashboards"))}><LayoutGrid aria-hidden /> Ir a Mi espacio</CommandItem>
+            )}
+            {!soloLectura && (
+              <CommandItem value="subir reemplazar excel archivo" onSelect={ejecutar(subir)}><Upload aria-hidden /> {enNube ? "Reemplazar Excel…" : "Subir Excel…"}</CommandItem>
+            )}
+            {!enNube && puedeVincular() && <CommandItem value="vincular archivo local en vivo" onSelect={ejecutar(() => void vincular())}><Link2 aria-hidden /> Vincular archivo local (en vivo)</CommandItem>}
+            {!enNube && MUESTRAS.map((m) => (
               <CommandItem key={m.ruta} value={`muestra ${m.descripcion}`} onSelect={ejecutar(() => void cargarMuestra(m.ruta, m.nombre))}><FileSpreadsheet aria-hidden /> Abrir muestra: {m.descripcion}</CommandItem>
             ))}
             <CommandItem value="limpiar filtros" onSelect={ejecutar(limpiarFiltros)}><X aria-hidden /> Limpiar filtros</CommandItem>
@@ -614,7 +628,8 @@ function Pestanas({ vistas, activa }: { vistas: typeof VISTAS; activa: Vista }) 
 }
 
 function Contenido() {
-  const { cargando, error, tabla, vista, setVista, cargarArchivo, filas } = useDash();
+  const { cargando, error, tabla, vista, setVista, cargarArchivo, filas, enNube, soloLectura } = useDash();
+  const nube = useNube();
   const [paleta, setPaleta] = useState(false);
   const prefs = usePreferencias();
   const [arrastrando, setArrastrando] = useState(false);
@@ -657,17 +672,21 @@ function Contenido() {
   return (
     <div
       className="min-h-screen"
-      onDragOver={(e) => { e.preventDefault(); setArrastrando(true); }}
+      onDragOver={(e) => { e.preventDefault(); if (!soloLectura) setArrastrando(true); }}
       onDragLeave={(e) => e.currentTarget === e.target && setArrastrando(false)}
       onDrop={(e) => {
         e.preventDefault();
         setArrastrando(false);
         const f = e.dataTransfer.files[0];
-        if (f) cargarArchivo(f);
+        if (f && !soloLectura) cargarArchivo(f);
       }}
     >
       <input ref={input} type="file" accept=".xlsx,.xlsm,.xls" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) cargarArchivo(f); e.target.value = ""; }} />
-      <BarraSuperior abrirPaleta={() => setPaleta(true)} subir={subir} prefs={prefs} />
+      {nube ? (
+        <BarraNube abrirPaleta={() => setPaleta(true)} subir={subir} prefs={prefs} />
+      ) : (
+        <BarraSuperior abrirPaleta={() => setPaleta(true)} subir={subir} prefs={prefs} />
+      )}
       <main className="mx-auto flex max-w-[1440px] flex-col px-4 py-6 sm:px-6" style={{ gap: "var(--gap)" }}>
         {error && (
           <div role="alert" className="flex items-start gap-2.5 rounded-xl border p-4 text-[13px]" style={{ background: "var(--critical-soft)", color: "var(--critical-text)", borderColor: "color-mix(in srgb, var(--critical) 30%, transparent)" }}>
@@ -710,7 +729,9 @@ function Contenido() {
               </TabsContent>
             </Tabs>
             <footer className="pt-6 text-center text-[12px] text-muted-foreground">
-              Tus archivos se procesan solo en tu navegador · no se envían a ningún servidor · <Kbd>⌘K</Kbd> para buscar
+              {enNube
+                ? <>El análisis se hace en tu navegador · el Excel se guarda cifrado y solo lo ven las personas con acceso · <Kbd>⌘K</Kbd> para buscar</>
+                : <>Modo de prueba: tus archivos se procesan solo en tu navegador · <Link href="/registro" className="underline underline-offset-4 hover:text-foreground">crea una cuenta</Link> para guardarlos y compartirlos · <Kbd>⌘K</Kbd> para buscar</>}
             </footer>
           </>
         )}
@@ -732,8 +753,8 @@ function Contenido() {
               style={{ boxShadow: "var(--shadow-pop)" }}
             >
               <Upload size={28} className="text-accent" aria-hidden />
-              <p className="text-[15px] font-semibold text-ink">Suelta tu Excel aquí</p>
-              <p className="text-[13px] text-muted-foreground">Se analiza en tu navegador, sin subirlo a ningún servidor</p>
+              <p className="text-[15px] font-semibold text-ink">{enNube ? "Suelta el Excel para reemplazar el actual" : "Suelta tu Excel aquí"}</p>
+              <p className="text-[13px] text-muted-foreground">{enNube ? "Quienes tienen acceso verán los datos nuevos" : "Se analiza en tu navegador, sin subirlo a ningún servidor"}</p>
             </motion.div>
           </motion.div>
         )}
@@ -770,13 +791,39 @@ function Esqueleto() {
   );
 }
 
-export default function Dashboard() {
+export interface PropsDashboard {
+  /** Dashboard guardado en la nube. Sin esto, modo de prueba local (sin cuenta). */
+  nube?: DatosNube & { fuente: { url: string; meta: Meta } | null; config: ConfigDashboard };
+}
+
+export default function Dashboard({ nube }: PropsDashboard) {
+  const dashboardId = nube?.dashboard.id;
+  // Reemplazar el Excel: ruta nueva → subida directa a Storage → el servidor apunta el dashboard al archivo nuevo.
+  const alReemplazar = useCallback(
+    async (archivo: File) => {
+      if (!dashboardId) return;
+      const prep = await prepararReemplazo(dashboardId, archivo.name);
+      if (!prep.ok) throw new Error(prep.error);
+      await subirExcel(prep.datos!.path, archivo);
+      const conf = await confirmarReemplazo(dashboardId, prep.datos!.path, archivo.name, archivo.size);
+      if (!conf.ok) throw new Error(conf.error);
+      toast.success("Excel reemplazado", { description: "Quienes tienen acceso verán los datos nuevos." });
+    },
+    [dashboardId],
+  );
   return (
     <MotionConfig reducedMotion="user">
       <TooltipProvider delayDuration={300}>
-        <ProveedorDash>
-          <Contenido />
-        </ProveedorDash>
+        <ProveedorNube valor={nube ?? null}>
+          <ProveedorDash
+            fuente={nube ? nube.fuente : null}
+            configInicial={nube?.config}
+            soloLectura={nube ? nube.dashboard.acceso === "lector" || !nube.usuario : false}
+            alReemplazar={nube ? alReemplazar : undefined}
+          >
+            <Contenido />
+          </ProveedorDash>
+        </ProveedorNube>
       </TooltipProvider>
     </MotionConfig>
   );
