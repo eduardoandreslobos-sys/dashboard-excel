@@ -1,201 +1,255 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
-import Grafico, { type Tokens } from "../Grafico";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search, X } from "lucide-react";
+import {
+  columnFilteringFeature, createFilteredRowModel, createSortedRowModel, globalFilteringFeature, rowSortingFeature, tableFeatures,
+  useTable, type ColumnDef, type ColumnFiltersState, type FilterFn, type SortFn, type SortingState,
+} from "@tanstack/react-table";
+import type { CellData, RowData, TableFeatures } from "@tanstack/table-core";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { toast } from "sonner";
 import { useDash } from "../Contexto";
-import { Estado, Panel, Selector } from "../ui";
+import { Estado, Panel } from "../ui";
 import { nombreMedida } from "./Resumen";
-import { agregacionDe, columna, descripcion, type Tabla } from "@/lib/analisis";
-import { aCSV, formato, porCategoria, serieTemporal, texto, type Calculo } from "@/lib/calculo";
-import { barrasH, linea } from "@/lib/opciones";
+import { columna, descripcion, type Fila, type Rol, type Tabla, type Valor } from "@/lib/analisis";
+import { aCSV, formato, texto } from "@/lib/calculo";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
-// ---------------------------------------------------------------- Explorador
-
-const CALCULOS: { valor: Calculo; texto: string }[] = [
-  { valor: "sum", texto: "Suma" },
-  { valor: "mean", texto: "Promedio" },
-  { valor: "median", texto: "Mediana" },
-  { valor: "max", texto: "Máximo" },
-  { valor: "min", texto: "Mínimo" },
-];
-
-export function Explorador() {
-  const { tabla, filas, alternarFiltro, filtros } = useDash();
-  const dims = tabla ? [...tabla.categorias, ...tabla.fechas] : [];
-  const [dim, setDim] = useState(dims[0] ?? "");
-  const [medida, setMedida] = useState("__registros");
-  const [calculo, setCalculo] = useState<Calculo | "auto">("auto");
-  const d = dims.includes(dim) ? dim : dims[0];
-  const m = medida === "__registros" ? null : medida;
-  const c: Calculo | undefined = !m ? undefined : calculo === "auto" ? agregacionDe(tabla!, m) : calculo;
-  const esFecha = tabla?.fechas.includes(d) ?? false;
-
-  const barras = useMemo(() => (tabla && d && !esFecha ? porCategoria(tabla, filas, d, m, c) : []), [tabla, filas, d, m, c, esFecha]);
-  const serie = useMemo(() => (tabla && d && esFecha ? serieTemporal(tabla, filas, d, "mes", m, c) : []), [tabla, filas, d, m, c, esFecha]);
-  const etiquetaCalc = m ? `${CALCULOS.find((x) => x.valor === c)?.texto} de ${m}` : "Registros";
-  const opcion = useCallback(
-    (t: Tokens) => (esFecha ? linea(t, serie, etiquetaCalc, t.series[0]) : barrasH(t, barras.slice(0, 30), { nombre: etiquetaCalc, seleccionados: filtros.categorias[d], total: c && c !== "sum" ? 0 : undefined })),
-    [esFecha, serie, barras, etiquetaCalc, filtros, d, c],
-  );
-  const clic = useCallback((e: { name?: string }) => !esFecha && e.name && alternarFiltro(d, e.name), [esFecha, alternarFiltro, d]);
-  if (!tabla || !d) return null;
-  return (
-    <Panel
-      titulo="Arma tu propio gráfico"
-      subtitulo="Elige qué agrupar, qué medir y cómo calcularlo"
-      acciones={
-        <>
-          <Selector etiqueta="Agrupar por" valor={d} opciones={dims.map((x) => ({ valor: x, texto: x }))} onChange={setDim} />
-          <Selector
-            etiqueta="Medida"
-            valor={medida}
-            opciones={[{ valor: "__registros", texto: "Registros (conteo)" }, ...tabla.medidas.map((x) => ({ valor: x, texto: x }))]}
-            onChange={setMedida}
-          />
-          {m && (
-            <Selector
-              etiqueta="Cálculo"
-              valor={calculo}
-              opciones={[{ valor: "auto" as const, texto: `Automático (${agregacionDe(tabla, m) === "mean" ? "promedio" : "suma"})` }, ...CALCULOS]}
-              onChange={setCalculo}
-            />
-          )}
-        </>
-      }
-    >
-      <Grafico opcion={opcion} onClick={clic} alto={esFecha ? 420 : Math.max(240, Math.min(30, barras.length) * 28 + 20)} etiqueta={`${etiquetaCalc} por ${d}`} />
-    </Panel>
-  );
+declare module "@tanstack/table-core" {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface ColumnMeta<in out TFeatures extends TableFeatures, in out TData extends RowData, TValue extends CellData = CellData> {
+    rol?: Rol;
+  }
 }
 
 // ---------------------------------------------------------------- Datos
 
-const POR_PAGINA = 50;
+const FUNCIONES = tableFeatures({
+  columnFilteringFeature,
+  globalFilteringFeature,
+  rowSortingFeature,
+  filteredRowModel: createFilteredRowModel(),
+  sortedRowModel: createSortedRowModel(),
+});
+type Funciones = typeof FUNCIONES;
+
+const ALTO_FILA = 36;
+const sinTildes = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+const comparable = (v: Valor) => (v instanceof Date ? v.getTime() : v);
+
+/** Nulos siempre al final; fechas por tiempo; números y textos en orden natural. */
+const ordenar: SortFn<Funciones, Fila> = (a, b, id) => {
+  const x = comparable(a.original[id]);
+  const y = comparable(b.original[id]);
+  if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+  if (typeof x === "number" && typeof y === "number") return x - y;
+  return String(x).localeCompare(String(y), "es", { numeric: true });
+};
+
+/** Coincidencia sin tildes ni mayúsculas sobre el texto que se ve en la celda. */
+const contiene: FilterFn<Funciones, Fila> = (fila, id, valor) => sinTildes(texto(fila.original[id])).includes(sinTildes(String(valor)));
+contiene.resolveFilterValue = (v: unknown) => String(v ?? "").trim();
 
 export function Datos() {
   const { tabla, filas, meta } = useDash();
   const [busqueda, setBusqueda] = useState("");
-  const [orden, setOrden] = useState<{ col: string; asc: boolean } | null>(null);
-  const [pagina, setPagina] = useState(0);
+  const [orden, setOrden] = useState<SortingState>([]);
+  const [filtrosCol, setFiltrosCol] = useState<ColumnFiltersState>([]);
+  const contenedor = useRef<HTMLDivElement>(null);
 
-  const visibles = useMemo(() => {
-    if (!tabla) return [];
-    const q = busqueda.trim().toLowerCase();
-    let res = q ? filas.filter((f) => tabla.columnas.some((c) => texto(f[c.nombre]).toLowerCase().includes(q))) : filas;
-    if (orden) {
-      const { col, asc } = orden;
-      res = [...res].sort((a, b) => {
-        const x = a[col], y = b[col];
-        const vx = x instanceof Date ? x.getTime() : x, vy = y instanceof Date ? y.getTime() : y;
-        if (vx === null) return 1;
-        if (vy === null) return -1;
-        return (vx < vy ? -1 : vx > vy ? 1 : 0) * (asc ? 1 : -1);
-      });
-    }
-    return res;
-  }, [tabla, filas, busqueda, orden]);
+  // La columna identificadora va primero y queda fija al desplazarse en horizontal.
+  const cols = useMemo(() => (tabla ? [...tabla.columnas].sort((a, b) => Number(b.rol === "id") - Number(a.rol === "id")) : []), [tabla]);
+  const fija = cols[0]?.rol === "id" ? cols[0].nombre : null;
 
   const maximos = useMemo(() => {
     const m: Record<string, number> = {};
-    tabla?.medidas.forEach((c) => (m[c] = Math.max(...filas.map((f) => Math.abs((f[c] as number) ?? 0)))));
+    tabla?.medidas.forEach((c) => (m[c] = Math.max(0, ...filas.map((f) => Math.abs((f[c] as number) ?? 0)))));
     return m;
   }, [tabla, filas]);
 
+  const columnas = useMemo<ColumnDef<Funciones, Fila>[]>(
+    () =>
+      cols.map((c) => ({
+        id: c.nombre,
+        accessorFn: (f: Fila) => f[c.nombre],
+        header: c.nombre,
+        sortFn: ordenar,
+        filterFn: contiene,
+        sortDescFirst: c.rol === "medida",
+        meta: { rol: c.rol },
+        cell: ({ getValue }) => {
+          const v = getValue() as Valor;
+          if (c.tonos && v !== null) return <Estado tono={c.tonos[texto(v)] ?? "neutro"} texto={texto(v)} />;
+          if (c.rol === "medida" && typeof v === "number") {
+            const ancho = maximos[c.nombre] ? (Math.abs(v) / maximos[c.nombre]) * 100 : 0;
+            return (
+              <div className="relative ml-auto flex min-w-[88px] justify-end">
+                <span className="absolute inset-y-0.5 right-0 rounded-sm bg-accent-soft" style={{ width: `${ancho}%` }} aria-hidden />
+                <span className="num relative text-ink">{formato(v)}</span>
+              </div>
+            );
+          }
+          return texto(v);
+        },
+      })),
+    [cols, maximos],
+  );
+
+  const table = useTable({
+    features: FUNCIONES,
+    columns: columnas,
+    data: filas,
+    state: { sorting: orden, columnFilters: filtrosCol, globalFilter: busqueda },
+    onSortingChange: setOrden,
+    onColumnFiltersChange: setFiltrosCol,
+    onGlobalFilterChange: setBusqueda,
+    globalFilterFn: contiene,
+    getColumnCanGlobalFilter: () => true,
+  });
+  const visibles = table.getRowModel().rows;
+
+  // eslint-disable-next-line react-hooks/incompatible-library -- el virtualizador se lee en cada render a propósito
+  const virtual = useVirtualizer({
+    count: visibles.length,
+    getScrollElement: () => contenedor.current,
+    estimateSize: () => ALTO_FILA,
+    overscan: 12,
+  });
+  // Al cambiar búsqueda, filtros u orden se vuelve al inicio de la tabla.
+  useEffect(() => {
+    contenedor.current?.scrollTo({ top: 0 });
+  }, [busqueda, filtrosCol, orden, filas]);
+  const items = virtual.getVirtualItems();
+  const arriba = items[0]?.start ?? 0;
+  const abajo = virtual.getTotalSize() - (items.at(-1)?.end ?? 0);
+
   if (!tabla) return null;
-  const paginas = Math.max(1, Math.ceil(visibles.length / POR_PAGINA));
-  const p = Math.min(pagina, paginas - 1);
-  const cols = tabla.columnas.map((c) => c.nombre);
+  const filtrosActivos = filtrosCol.length + (busqueda ? 1 : 0);
 
   const descargar = () => {
-    const blob = new Blob([aCSV(visibles, cols)], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([aCSV(visibles.map((r) => r.original), cols.map((c) => c.nombre))], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${(meta?.nombre ?? "datos").replace(/\.xlsx?$/i, "")}_filtrado.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
+    toast.success("CSV descargado", { description: `${formato(visibles.length)} registros con el orden y los filtros actuales.` });
   };
 
+  const fondoFija = "bg-card group-hover/fila:bg-surface-hover";
   return (
     <Panel
       titulo={`${formato(visibles.length)} registros`}
-      subtitulo="Busca en todas las columnas; clic en un encabezado para ordenar"
+      subtitulo="Busca en todas las columnas, filtra cada una y haz clic en un encabezado para ordenar"
       acciones={
         <>
-          <label className="ctl w-56 cursor-text">
-            <Search size={14} className="text-ink-3" aria-hidden />
-            <input
-              value={busqueda}
-              onChange={(e) => { setBusqueda(e.target.value); setPagina(0); }}
-              placeholder="Buscar…"
-              className="w-full bg-transparent outline-none placeholder:text-ink-3"
-              aria-label="Buscar en la tabla"
-            />
-          </label>
-          <button type="button" className="ctl" onClick={descargar}>
-            <Download size={14} aria-hidden /> CSV
-          </button>
+          <div className="relative w-full sm:w-56">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar…" aria-label="Buscar en la tabla" className="bg-card pl-8" />
+          </div>
+          {filtrosActivos > 0 && (
+            <Button variant="ghost" onClick={() => { setBusqueda(""); setFiltrosCol([]); }} className="text-muted-foreground">
+              <X aria-hidden /> Limpiar
+            </Button>
+          )}
+          <Button variant="outline" className="bg-card" onClick={descargar}>
+            <Download aria-hidden /> CSV
+          </Button>
         </>
       }
     >
-      <div className="-mx-[var(--pad)] overflow-x-auto border-y border-line">
-        <table className="w-full min-w-max border-collapse text-[13px]">
-          <thead className="sticky top-0 bg-surface-2">
-            <tr>
-              {tabla.columnas.map((c) => {
-                const activo = orden?.col === c.nombre;
-                return (
-                  <th key={c.nombre} scope="col" className={`whitespace-nowrap px-3 py-2 font-medium text-ink-3 ${c.rol === "medida" ? "text-right" : "text-left"}`}>
-                    <button
-                      type="button"
-                      onClick={() => setOrden({ col: c.nombre, asc: activo ? !orden!.asc : c.rol !== "medida" })}
-                      className="inline-flex items-center gap-1 hover:text-ink"
+      <div
+        ref={contenedor}
+        className="-mx-[var(--pad)] max-h-[min(70vh,640px)] overflow-auto border-y border-line"
+        role="region"
+        aria-label="Tabla de registros"
+        tabIndex={0}
+      >
+        <table className="w-full min-w-max border-separate border-spacing-0 text-[13px]" aria-rowcount={visibles.length + 2}>
+          <thead className="sticky top-0 z-20">
+            {table.getHeaderGroups().map((grupo) => (
+              <tr key={grupo.id}>
+                {grupo.headers.map((h) => {
+                  const rol = h.column.columnDef.meta?.rol;
+                  const dir = h.column.getIsSorted();
+                  const Flecha = dir === "asc" ? ArrowUp : dir === "desc" ? ArrowDown : ArrowUpDown;
+                  return (
+                    <th
+                      key={h.id}
+                      scope="col"
+                      aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"}
+                      className={cn(
+                        "border-b border-line bg-muted px-3 pt-2 pb-1 font-medium whitespace-nowrap text-muted-foreground",
+                        rol === "medida" ? "text-right" : "text-left",
+                        h.column.id === fija && "sticky left-0 z-10 border-r",
+                      )}
                     >
-                      {c.nombre}
-                      {activo && (orden!.asc ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
-                    </button>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {visibles.slice(p * POR_PAGINA, (p + 1) * POR_PAGINA).map((f, i) => (
-              <tr key={i} className="border-t border-line hover:bg-surface-hover">
-                {tabla.columnas.map((c) => {
-                  const v = f[c.nombre];
-                  if (c.tonos && v !== null) return <td key={c.nombre} className="px-3 py-1.5"><Estado tono={c.tonos[texto(v)] ?? "neutro"} texto={texto(v)} /></td>;
-                  if (c.rol === "medida" && typeof v === "number") {
-                    const ancho = maximos[c.nombre] ? (Math.abs(v) / maximos[c.nombre]) * 100 : 0;
-                    return (
-                      <td key={c.nombre} className="px-3 py-1.5 text-right">
-                        <div className="relative inline-flex min-w-[88px] justify-end">
-                          <span className="absolute inset-y-0.5 right-0 rounded-sm bg-accent-soft" style={{ width: `${ancho}%` }} aria-hidden />
-                          <span className="num relative text-ink">{formato(v)}</span>
-                        </div>
-                      </td>
-                    );
-                  }
-                  return <td key={c.nombre} className={`whitespace-nowrap px-3 py-1.5 ${c.rol === "id" ? "num text-ink-3" : "text-ink-2"}`}>{texto(v)}</td>;
+                      <button
+                        type="button"
+                        onClick={h.column.getToggleSortingHandler()}
+                        className={cn("group/orden inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring", dir && "text-foreground")}
+                      >
+                        {String(h.column.columnDef.header)}
+                        <Flecha size={12} className={cn(!dir && "opacity-0 group-hover/orden:opacity-60 group-focus-visible/orden:opacity-60")} aria-hidden />
+                      </button>
+                    </th>
+                  );
                 })}
               </tr>
             ))}
+            <tr>
+              {table.getHeaderGroups()[0]?.headers.map((h) => (
+                <th key={h.id} className={cn("border-b border-line bg-muted px-2 pb-2 font-normal", h.column.id === fija && "sticky left-0 z-10 border-r")}>
+                  <input
+                    value={(h.column.getFilterValue() as string) ?? ""}
+                    onChange={(e) => h.column.setFilterValue(e.target.value || undefined)}
+                    placeholder="Filtrar…"
+                    aria-label={`Filtrar ${h.column.id}`}
+                    className={cn(
+                      "h-7 w-full min-w-[72px] rounded-md border border-line bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
+                      h.column.columnDef.meta?.rol === "medida" && "text-right",
+                    )}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {arriba > 0 && <tr aria-hidden><td colSpan={cols.length} style={{ height: arriba, padding: 0 }} /></tr>}
+            {items.map((item) => {
+              const fila = visibles[item.index];
+              return (
+                <tr key={fila.id} className="group/fila" style={{ height: ALTO_FILA }} aria-rowindex={item.index + 3}>
+                  {fila.getAllCells().map((celda) => {
+                    const rol = celda.column.columnDef.meta?.rol;
+                    return (
+                      <td
+                        key={celda.id}
+                        className={cn(
+                          "border-b border-line px-3 whitespace-nowrap group-hover/fila:bg-surface-hover",
+                          rol === "medida" ? "text-right" : rol === "id" ? "num text-muted-foreground" : "text-ink-2",
+                          celda.column.id === fija && cn("sticky left-0 z-[1] border-r", fondoFija),
+                        )}
+                      >
+                        <table.FlexRender cell={celda} />
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+            {abajo > 0 && <tr aria-hidden><td colSpan={cols.length} style={{ height: abajo, padding: 0 }} /></tr>}
           </tbody>
         </table>
+        {visibles.length === 0 && <p className="p-8 text-center text-[13px] text-muted-foreground">Ningún registro coincide con la búsqueda.</p>}
       </div>
-      <div className="mt-3 flex items-center justify-between text-[12px] text-ink-3">
-        <span>
-          Página {p + 1} de {paginas}
-        </span>
-        <div className="flex gap-1">
-          <button type="button" className="ctl h-7 px-2" disabled={p === 0} onClick={() => setPagina(p - 1)} aria-label="Página anterior">
-            <ChevronLeft size={14} />
-          </button>
-          <button type="button" className="ctl h-7 px-2" disabled={p >= paginas - 1} onClick={() => setPagina(p + 1)} aria-label="Página siguiente">
-            <ChevronRight size={14} />
-          </button>
-        </div>
-      </div>
+      <p className="mt-3 text-[12px] text-muted-foreground">
+        {orden.length > 0 ? `Ordenado por ${orden[0].id} (${orden[0].desc ? "mayor a menor" : "menor a mayor"})` : "Sin orden aplicado"}
+        {" · "}desplázate para ver más filas
+      </p>
     </Panel>
   );
 }
