@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search, X } from "lucide-react";
 import {
   columnFilteringFeature, createFilteredRowModel, createSortedRowModel, globalFilteringFeature, rowSortingFeature, tableFeatures,
@@ -9,13 +9,11 @@ import {
 import type { CellData, RowData, TableFeatures } from "@tanstack/table-core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
-import Grafico, { type Tokens } from "../Grafico";
 import { useDash } from "../Contexto";
-import { Estado, Panel, Selector } from "../ui";
+import { Estado, Panel } from "../ui";
 import { nombreMedida } from "./Resumen";
-import { agregacionDe, columna, descripcion, type Fila, type Rol, type Tabla, type Valor } from "@/lib/analisis";
-import { aCSV, formato, porCategoria, serieTemporal, texto, type Calculo } from "@/lib/calculo";
-import { barrasH, linea } from "@/lib/opciones";
+import { columna, descripcion, type Fila, type Rol, type Tabla, type Valor } from "@/lib/analisis";
+import { aCSV, formato, texto } from "@/lib/calculo";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,65 +23,6 @@ declare module "@tanstack/table-core" {
   interface ColumnMeta<in out TFeatures extends TableFeatures, in out TData extends RowData, TValue extends CellData = CellData> {
     rol?: Rol;
   }
-}
-
-// ---------------------------------------------------------------- Explorador
-
-const CALCULOS: { valor: Calculo; texto: string }[] = [
-  { valor: "sum", texto: "Suma" },
-  { valor: "mean", texto: "Promedio" },
-  { valor: "median", texto: "Mediana" },
-  { valor: "max", texto: "Máximo" },
-  { valor: "min", texto: "Mínimo" },
-];
-
-export function Explorador() {
-  const { tabla, filas, alternarFiltro, filtros } = useDash();
-  const dims = tabla ? [...tabla.categorias, ...tabla.fechas] : [];
-  const [dim, setDim] = useState(dims[0] ?? "");
-  const [medida, setMedida] = useState("__registros");
-  const [calculo, setCalculo] = useState<Calculo | "auto">("auto");
-  const d = dims.includes(dim) ? dim : dims[0];
-  const m = medida === "__registros" ? null : medida;
-  const c: Calculo | undefined = !m ? undefined : calculo === "auto" ? agregacionDe(tabla!, m) : calculo;
-  const esFecha = tabla?.fechas.includes(d) ?? false;
-
-  const barras = useMemo(() => (tabla && d && !esFecha ? porCategoria(tabla, filas, d, m, c) : []), [tabla, filas, d, m, c, esFecha]);
-  const serie = useMemo(() => (tabla && d && esFecha ? serieTemporal(tabla, filas, d, "mes", m, c) : []), [tabla, filas, d, m, c, esFecha]);
-  const etiquetaCalc = m ? `${CALCULOS.find((x) => x.valor === c)?.texto} de ${m}` : "Registros";
-  const opcion = useCallback(
-    (t: Tokens) => (esFecha ? linea(t, serie, etiquetaCalc, t.series[0]) : barrasH(t, barras.slice(0, 30), { nombre: etiquetaCalc, seleccionados: filtros.categorias[d], total: c && c !== "sum" ? 0 : undefined })),
-    [esFecha, serie, barras, etiquetaCalc, filtros, d, c],
-  );
-  const clic = useCallback((e: { name?: string }) => !esFecha && e.name && alternarFiltro(d, e.name), [esFecha, alternarFiltro, d]);
-  if (!tabla || !d) return null;
-  return (
-    <Panel
-      titulo="Arma tu propio gráfico"
-      subtitulo="Elige qué agrupar, qué medir y cómo calcularlo"
-      acciones={
-        <>
-          <Selector etiqueta="Agrupar por" valor={d} opciones={dims.map((x) => ({ valor: x, texto: x }))} onChange={setDim} />
-          <Selector
-            etiqueta="Medida"
-            valor={medida}
-            opciones={[{ valor: "__registros", texto: "Registros (conteo)" }, ...tabla.medidas.map((x) => ({ valor: x, texto: x }))]}
-            onChange={setMedida}
-          />
-          {m && (
-            <Selector
-              etiqueta="Cálculo"
-              valor={calculo}
-              opciones={[{ valor: "auto" as const, texto: `Automático (${agregacionDe(tabla, m) === "mean" ? "promedio" : "suma"})` }, ...CALCULOS]}
-              onChange={setCalculo}
-            />
-          )}
-        </>
-      }
-    >
-      <Grafico opcion={opcion} onClick={clic} alto={esFecha ? 420 : Math.max(240, Math.min(30, barras.length) * 28 + 20)} etiqueta={`${etiquetaCalc} por ${d}`} />
-    </Panel>
-  );
 }
 
 // ---------------------------------------------------------------- Datos

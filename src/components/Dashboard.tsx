@@ -13,7 +13,8 @@ import {
 import { MUESTRAS, ProveedorDash, useDash, type Vista } from "./Contexto";
 import { Resumen, Tendencias, nombreMedida } from "./vistas/Resumen";
 import { Distribucion, Relaciones, Segmentos } from "./vistas/Segmentos";
-import { Datos, Explorador, Lectura } from "./vistas/Datos";
+import { Datos, Lectura } from "./vistas/Datos";
+import { Explorador } from "./vistas/Explorador";
 import { Vacio } from "./ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
