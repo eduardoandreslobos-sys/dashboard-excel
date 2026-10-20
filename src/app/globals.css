@@ -18,6 +18,12 @@
 }
 
 /* Tokens de diseño. Claro por defecto; oscuro por preferencia del sistema o por el selector de tema. */
+/*
+ * El bloque :root define los tokens propios y, al final, las variables de shadcn/ui
+ * derivadas de ellos (así el modo oscuro y la densidad se heredan solos). En este
+ * proyecto --accent es el azul de marca; shadcn usa bg-surface-hover para el hover.
+ * (Sin comentarios dentro del bloque: el CSS de desarrollo los procesaba mal.)
+ */
 :root {
   color-scheme: light;
   --bg: #f7f8fa;
@@ -52,11 +58,6 @@
   --pad: 20px;
   --chart-h: 300px;
 
-  /*
-   * Variables de shadcn/ui, todas derivadas de los tokens de arriba (así el modo
-   * oscuro y la densidad se heredan solos). Ojo: en este proyecto `--accent` es el
-   * azul de marca; los componentes shadcn usan `bg-surface-hover` para el hover.
-   */
   --background: var(--bg);
   --foreground: var(--text);
   --card: var(--surface);
