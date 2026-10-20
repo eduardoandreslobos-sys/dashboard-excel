@@ -19,7 +19,6 @@ await db.exec(`
   grant usage on schema public, auth, storage to anon, authenticated;
   grant execute on function auth.uid() to anon, authenticated;
   grant select, insert, update, delete on storage.objects to authenticated;
-  alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated;
 `);
 await db.exec(readFileSync(MIGRACION, "utf8"));
 console.log("✓ Migración aplicada sin errores");

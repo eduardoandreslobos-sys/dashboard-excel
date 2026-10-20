@@ -314,6 +314,18 @@ create policy "quitar permisos" on public.dashboard_permisos for delete to authe
 create policy "auditoria solo admin" on public.auditoria for select to authenticated
   using (public.es_admin());
 
+-- Permisos explícitos por tabla (el proyecto no expone tablas nuevas automáticamente).
+-- Los anónimos no reciben nada; los autenticados operan siempre bajo RLS.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, update on public.profiles to authenticated;
+grant select, insert, update on public.workspaces to authenticated;
+grant select on public.workspace_miembros to authenticated;
+grant select, insert, update, delete on public.dashboards to authenticated;
+grant select, insert, update, delete on public.dashboard_permisos to authenticated;
+grant select on public.auditoria to authenticated;
+grant all on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
+
 -- Las funciones de acceso solo las ejecutan usuarios autenticados (y el servidor).
 revoke execute on function public.registrar(text, text, text, jsonb) from public, anon;
 revoke execute on function public.buscar_usuario_por_email(text) from public, anon;
