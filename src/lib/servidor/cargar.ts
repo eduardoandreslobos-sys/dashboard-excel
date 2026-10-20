@@ -1,4 +1,5 @@
 import "server-only";
+import { connection } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseServidor } from "@/lib/supabase/servidor";
 import type { PropsDashboard } from "@/components/Dashboard";
@@ -30,6 +31,7 @@ export async function cargarParaUsuario(id: string, yo: Perfil): Promise<Nube | 
 /** Vista pública por enlace: sin sesión. Se valida el token en el servidor con la clave de servicio, solo lectura. */
 export async function cargarPublico(token: string): Promise<Nube | null> {
   if (!/^[\w-]{20,64}$/.test(token)) return null;
+  await connection();
   const admin = supabaseAdmin();
   const { data } = await admin.from("dashboards").select("*").eq("enlace_publico", token).maybeSingle();
   const d = data as Dashboard | null;

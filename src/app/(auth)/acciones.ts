@@ -26,6 +26,8 @@ function traducir(mensaje: string): string {
   if (m.includes("invalid login")) return "Correo o contraseña incorrectos.";
   if (m.includes("email not confirmed")) return "Confirma tu correo: te enviamos un enlace al registrarte.";
   if (m.includes("already registered") || m.includes("already been registered")) return "Ya existe una cuenta con ese correo.";
+  if (m.includes("email address") && m.includes("invalid")) return "Ese correo no es válido. Revisa que esté bien escrito.";
+  if (m.includes("not authorized")) return "No pudimos enviar el correo de confirmación a esa dirección. Contacta a un administrador.";
   if (m.includes("banned")) return "Tu cuenta está suspendida. Contacta a un administrador.";
   if (m.includes("rate limit") || m.includes("too many")) return "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.";
   if (m.includes("weak") || m.includes("password")) return "La contraseña es muy débil. Usa al menos 8 caracteres combinando letras y números.";

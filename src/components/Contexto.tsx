@@ -93,7 +93,8 @@ export function ProveedorDash({ children, fuente = null, configInicial, soloLect
   const manejador = useRef<ManejadorArchivo | null>(null);
   const ultimaFirma = useRef(0);
   const enNube = fuente !== null;
-  const [guardada, setGuardada] = useState<string>(() => JSON.stringify(configInicial ?? {}));
+  /** Vista guardada serializada; null hasta que termina la carga inicial. */
+  const [guardada, setGuardada] = useState<string | null>(null);
 
   const tabla = useMemo(() => tablas.find((t) => t.id === tablaId) ?? null, [tablas, tablaId]);
   const filas = useMemo(() => (tabla ? aplicarFiltros(tabla.filas, filtros) : []), [tabla, filtros]);
@@ -260,7 +261,13 @@ export function ProveedorDash({ children, fuente = null, configInicial, soloLect
     () => ({ tablaId: tablaId ?? undefined, medida, vista, periodo, filtros }),
     [tablaId, medida, vista, periodo, filtros],
   );
-  const sinGuardar = enNube && !soloLectura && tablas.length > 0 && JSON.stringify(config) !== guardada;
+  // Al terminar la carga inicial, la vista restaurada cuenta como "guardada".
+  useEffect(() => {
+    // Sincroniza con un estado externo (la carga asíncrona del archivo): ocurre una sola vez.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (guardada === null && tablas.length > 0 && !cargando) setGuardada(JSON.stringify(config));
+  }, [guardada, tablas, cargando, config]);
+  const sinGuardar = enNube && !soloLectura && guardada !== null && JSON.stringify(config) !== guardada;
   const marcarGuardado = useCallback(() => setGuardada(JSON.stringify(config)), [config]);
 
   const valor: Estado = {
