@@ -58,8 +58,8 @@ export async function eliminarUsuario(userId: string): Promise<Resultado> {
       if (archivos?.length) await admin.storage.from("excels").remove(archivos.map((a) => `${ws.id}/${c.name}/${a.name}`));
     }
   }
-  const supabase = await supabaseServidor();
-  await supabase.rpc("registrar", { p_accion: "usuario.eliminar", p_tipo: "usuario", p_id: userId, p_detalle: { email: perfil?.email ?? "" } });
+  // La auditoría solo la escribe el servidor: queda registrado quién eliminó la cuenta.
+  await admin.from("auditoria").insert({ actor_id: yo.id, accion: "usuario.eliminar", objetivo_tipo: "usuario", objetivo_id: userId, detalle: { email: perfil?.email ?? "" } });
   const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) return fallo("No pude eliminar la cuenta.");
   revalidatePath("/admin");

@@ -3,7 +3,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import { readFileSync } from "node:fs";
 
-const MIGRACION = process.argv[2] ?? new URL("../migrations/20261020230000_multiusuario.sql", import.meta.url).pathname;
+import { readdirSync } from "node:fs";
+const CARPETA = new URL("../migrations/", import.meta.url).pathname;
+const MIGRACIONES = readdirSync(CARPETA).filter((f) => f.endsWith(".sql")).sort().map((f) => CARPETA + f);
 const db = new PGlite();
 
 await db.exec(`
@@ -20,8 +22,9 @@ await db.exec(`
   grant execute on function auth.uid() to anon, authenticated;
   grant select, insert, update, delete on storage.objects to authenticated;
 `);
-await db.exec(readFileSync(MIGRACION, "utf8"));
-console.log("✓ Migración aplicada sin errores");
+await db.exec(`create role postgres_api nologin; grant service_role to postgres_api;`);
+for (const m of MIGRACIONES) await db.exec(readFileSync(m, "utf8"));
+console.log(`✓ ${MIGRACIONES.length} migraciones aplicadas sin errores`);
 
 const U = {
   admin: "00000000-0000-4000-8000-000000000001",
@@ -146,6 +149,12 @@ r = await como("ana", `select accion from public.auditoria`);
 esperar("Ana NO ve la auditoría", r.filas?.length === 0, r);
 r = await como("ana", `insert into public.auditoria (accion, objetivo_tipo) values ('falso', 'x')`);
 esperar("Nadie puede escribir la auditoría directamente", Boolean(r.error), r);
+r = await como("ana", `select public.registrar('falso', 'x', null, '{}'::jsonb)`);
+esperar("Nadie puede inventar entradas llamando a registrar()", Boolean(r.error), r);
+r = await como(null, `select public.es_admin()`);
+esperar("Anónimo NO puede invocar funciones internas", Boolean(r.error), r);
+r = await como("ana", `select public.handle_new_user()`);
+esperar("Nadie puede invocar los triggers por la API", Boolean(r.error), r);
 
 await db.exec(`update public.profiles set estado = 'suspendido' where id = '${U.admin}'`);
 r = await como("admin", `select id from public.profiles`);
