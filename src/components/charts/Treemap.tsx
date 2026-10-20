@@ -54,7 +54,7 @@ export function Treemap({
   const hay = (seleccionados?.length ?? 0) > 0;
   if (!datos.length) return <p className="py-10 text-center text-[13px] text-ink-3">Sin valores positivos para comparar.</p>;
 
-  const Celda = (p: PropsCelda) => {
+  const dibujarCelda = (p: PropsCelda) => {
     const { x = 0, y = 0, width: w = 0, height: h = 0, depth, name = "", size = 0 } = p;
     if (depth !== 1 || w <= 0 || h <= 0) return <g />;
     const color = colorDe(name);
@@ -91,7 +91,7 @@ export function Treemap({
 
   return (
     <Marco etiqueta={etiqueta} alto={alto ?? 340}>
-      <RTreemap data={datos} dataKey="size" nameKey="name" aspectRatio={4 / 3} isAnimationActive={animar} animationDuration={500} content={<Celda />}>
+      <RTreemap data={datos} dataKey="size" nameKey="name" aspectRatio={4 / 3} isAnimationActive={animar} animationDuration={500} content={dibujarCelda}>
         <Tooltip
           wrapperStyle={TIP_WRAPPER}
           isAnimationActive={false}

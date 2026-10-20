@@ -21,12 +21,29 @@ export const COLOR_OTROS = "var(--neutral)";
 
 /**
  * Color por entidad: tono semántico si la columna es de estado; si no, posición fija
- * según el orden alfabético de TODOS los valores de la tabla (un filtro no repinta).
+ * según el orden alfabético de TODOS los valores de la tabla (un filtro no repinta);
+ * con más de 8 valores, un solo tono.
  */
 export function colorPorEntidad(tabla: Tabla, cat: string): (valor: string) => string {
   const tonos = columna(tabla, cat)?.tonos;
-  if (tonos) return (v) => COLOR_ESTADO[tonos[v] ?? "neutro"];
+  if (tonos) {
+    // Dos valores con el mismo tono (p. ej. "Vigente" y "Pagado anticipado") se distinguen
+    // con un paso más claro del mismo color; el más frecuente (en toda la tabla) lleva el pleno.
+    const cuenta = new Map<string, number>();
+    for (const f of tabla.filas) cuenta.set(texto(f[cat]), (cuenta.get(texto(f[cat])) ?? 0) + 1);
+    const hermanos = (t: Tono) =>
+      Object.keys(tonos)
+        .filter((k) => tonos[k] === t)
+        .sort((a, b) => (cuenta.get(b) ?? 0) - (cuenta.get(a) ?? 0) || a.localeCompare(b));
+    return (v) => {
+      const t = tonos[v] ?? "neutro";
+      const k = Math.max(0, hermanos(t).indexOf(v));
+      return k ? mezcla(COLOR_ESTADO[t], "var(--surface)", Math.min(0.6, 0.38 * k)) : COLOR_ESTADO[t];
+    };
+  }
   const orden = [...new Set(tabla.filas.map((f) => texto(f[cat])))].sort();
+  // Más de 8 valores: no hay colores fijos para todos; un solo tono (la etiqueta da la identidad).
+  if (orden.length > 8) return () => serie(0);
   return (v) => {
     const i = orden.indexOf(v);
     return i < 0 || i >= 8 || v === OTROS ? COLOR_OTROS : serie(i);

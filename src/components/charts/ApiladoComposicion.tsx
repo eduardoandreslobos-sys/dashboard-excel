@@ -50,10 +50,10 @@ export function ApiladoComposicion({
     <div>
       <Leyenda items={series} onClick={alternar} activos={series.filter((s) => !ocultas.includes(s.nombre)).map((s) => s.nombre)} />
       <Marco etiqueta={etiqueta} alto={alto}>
-        <BarChart data={datos} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="18%">
+        <BarChart data={datos} margin={{ top: 10, right: 8, bottom: 0, left: 0 }} barCategoryGap="18%">
           <CartesianGrid {...GRILLA} />
           <XAxis dataKey="etiqueta" {...EJE} minTickGap={16} tickMargin={8} />
-          <YAxis {...EJE} width={44} domain={modo === "100" ? [0, 100] : [0, "auto"]} tickFormatter={(v: number) => (modo === "100" ? `${v} %` : compacto(v))} />
+          <YAxis {...EJE} width={48} domain={modo === "100" ? [0, 100] : [0, "auto"]} ticks={modo === "100" ? [0, 25, 50, 75, 100] : undefined} tickFormatter={(v: number) => (modo === "100" ? `${v} %` : compacto(v))} />
           <Tooltip
             cursor={CURSOR}
             wrapperStyle={TIP_WRAPPER}

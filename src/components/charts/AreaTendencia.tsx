@@ -56,7 +56,7 @@ export function AreaTendencia({
   const marcar = anotar && resumen.max.t !== resumen.min.t;
   return (
     <Marco etiqueta={etiqueta ?? `${nombre} en el tiempo`} alto={alto}>
-      <AreaChart data={datos} margin={{ top: 22, right: 12, bottom: 0, left: 0 }}>
+      <AreaChart data={datos} margin={{ top: 22, right: 28, bottom: 6, left: 0 }}>
         <defs>
           <linearGradient id={`a${id}`} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity={0.24} />
@@ -137,15 +137,19 @@ export function AreaTendencia({
         {brush && puntos.length > 6 && (
           <Brush
             dataKey="etiqueta"
-            height={26}
-            travellerWidth={8}
+            height={32}
+            travellerWidth={10}
             stroke="var(--border-strong)"
             fill="var(--surface-2)"
             tickFormatter={() => ""}
             onChange={(r) => {
               if (onRango && r.startIndex !== undefined && r.endIndex !== undefined) onRango({ desde: r.startIndex, hasta: r.endIndex });
             }}
-          />
+          >
+            <AreaChart data={datos}>
+              <Area type="monotone" dataKey="valor" stroke={color} strokeWidth={1} fill={color} fillOpacity={0.12} connectNulls isAnimationActive={false} dot={false} />
+            </AreaChart>
+          </Brush>
         )}
       </AreaChart>
     </Marco>

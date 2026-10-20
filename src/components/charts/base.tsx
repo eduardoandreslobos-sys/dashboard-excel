@@ -8,7 +8,7 @@ import { porcentaje } from "./tema";
 /** Contenedor común: tamaño fijo en alto, ancho fluido y nombre accesible. */
 export function Marco({ etiqueta, alto, children, className = "" }: { etiqueta: string; alto?: number | string; children: ReactNode; className?: string }) {
   return (
-    <figure aria-label={etiqueta} className={`relative m-0 w-full min-w-0 ${className}`} style={{ height: alto ?? "var(--chart-h)" }}>
+    <figure aria-label={etiqueta} className={`relative m-0 w-full min-w-0 [&_.recharts-surface]:outline-none [&_.recharts-wrapper]:outline-none [&_.recharts-brush_*]:outline-none ${className}`} style={{ height: alto ?? "var(--chart-h)" }}>
       <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 320, height: 200 }}>
         {children as React.ReactElement}
       </ResponsiveContainer>

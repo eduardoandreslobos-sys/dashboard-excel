@@ -80,20 +80,32 @@ export function KpiHero({
           {detalle && <span className="truncate">{detalle}</span>}
         </div>
       </div>
-      {tendencia && tendencia.length >= 3 && <Chispa puntos={tendencia} alto={grande ? 64 : 40} etiqueta={etiqueta} />}
+      {tendencia && tendencia.length >= 3 && <Chispa puntos={tendencia} alto={grande ? "100%" : 40} etiqueta={etiqueta} className={grande ? "min-h-20 flex-1" : ""} />}
     </div>
   );
 }
 
 /** Sparkline de área con degradado; el último periodo lleva el punto. */
-export function Chispa({ puntos, alto = 40, etiqueta, color = "var(--s1)" }: { puntos: Punto[]; alto?: number; etiqueta: string; color?: string }) {
+export function Chispa({
+  puntos,
+  alto = 40,
+  etiqueta,
+  color = "var(--s1)",
+  className = "",
+}: {
+  puntos: Punto[];
+  alto?: number | string;
+  etiqueta: string;
+  color?: string;
+  className?: string;
+}) {
   const id = useId().replace(/:/g, "");
   const animar = useAnimar();
   const datos = puntos.map((p) => ({ ...p, valor: Number.isFinite(p.valor) ? p.valor : null }));
   const ultimo = datos.length - 1;
   return (
-    <div className="mt-3 -mx-1" style={{ height: alto }} aria-label={`Tendencia de ${etiqueta}`} role="img">
-      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 200, height: alto }}>
+    <div className={`-mx-1 mt-3 [&_.recharts-surface]:outline-none [&_.recharts-wrapper]:outline-none ${className}`} style={{ height: alto }} aria-label={`Tendencia de ${etiqueta}`} role="img">
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 200, height: 40 }}>
         <AreaChart data={datos} margin={{ top: 4, right: 6, bottom: 2, left: 6 }}>
           <defs>
             <linearGradient id={`k${id}`} x1="0" x2="0" y1="0" y2="1">

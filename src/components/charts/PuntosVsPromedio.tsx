@@ -39,7 +39,7 @@ export function PuntosVsPromedio({
 }) {
   const animar = useAnimar();
   const datos = useMemo<Fila[]>(
-    () => barras.filter((b) => Number.isFinite(b.valor)).map((b) => ({ ...b, rango: [promedio, b.valor], sobre: b.valor >= promedio })),
+    () => barras.filter((b) => Number.isFinite(b.valor)).map((b) => ({ ...b, rango: [Math.min(promedio, b.valor), Math.max(promedio, b.valor)], sobre: b.valor >= promedio })),
     [barras, promedio],
   );
   const anchoEje = Math.min(150, Math.max(56, Math.max(0, ...datos.map((b) => Math.min(22, b.etiqueta.length))) * 6.4 + 8));
@@ -63,9 +63,9 @@ export function PuntosVsPromedio({
         </li>
       </ul>
       <Marco etiqueta={etiqueta ?? `${nombre} por segmento`} alto={Math.max(140, datos.length * 32 + 30)}>
-        <ComposedChart data={datos} layout="vertical" margin={{ top: 4, right: 56, bottom: 0, left: 0 }}>
+        <ComposedChart data={datos} layout="vertical" margin={{ top: 4, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid stroke="var(--grid)" horizontal={false} />
-          <XAxis type="number" {...EJE} domain={["auto", "auto"]} tickFormatter={(v: number) => compacto(v)} />
+          <XAxis type="number" {...EJE} domain={["auto", "auto"]} padding={{ left: 48, right: 48 }} tickFormatter={(v: number) => compacto(v)} />
           <YAxis type="category" dataKey="etiqueta" {...EJE} width={anchoEje} interval={0} tick={{ ...EJE.tick, fill: "var(--text-2)" }} tickFormatter={(s: string) => corta(s, 22)} />
           <ReferenceLine x={promedio} stroke="var(--text-3)" strokeDasharray="4 4" ifOverflow="extendDomain" />
           <Tooltip
@@ -111,7 +111,7 @@ export function PuntosVsPromedio({
                   <rect x={x0} y={y} width={Math.max(1, x1 - x0)} height={height} fill="transparent" />
                   <line x1={x0} x2={x1} y1={cy} y2={cy} stroke={color} strokeWidth={2} strokeLinecap="round" />
                   <circle cx={fin} cy={cy} r={6} fill={color} stroke="var(--surface)" strokeWidth={2} />
-                  <text x={x1 + 12} y={cy} dy="0.35em" fontSize={11} style={{ fill: "var(--text-2)" }} className="num">
+                  <text x={payload.sobre ? x1 + 12 : x0 - 12} y={cy} dy="0.35em" textAnchor={payload.sobre ? "start" : "end"} fontSize={11} style={{ fill: "var(--text-2)" }} className="num">
                     {compacto(payload.valor)}
                     {unidad}
                   </text>

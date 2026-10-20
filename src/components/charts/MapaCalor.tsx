@@ -43,20 +43,22 @@ export function MapaCalor({
   formatoValor?: (v: number) => string;
   sumable?: boolean;
 }) {
-  const anchoY = Math.min(150, Math.max(40, Math.max(0, ...ys.map((y) => Math.min(20, y.length))) * 6.6 + 10));
+  const anchoY = Math.min(150, Math.max(40, Math.max(0, ...ys.map((y) => Math.min(20, String(y).length))) * 6.6 + 10));
   const altoCelda = 36;
   const alto = ys.length * altoCelda + 30;
   const minimo = anchoY + xs.length * 44;
   return (
-    <figure aria-label={etiqueta} className="m-0 w-full overflow-x-auto">
-      <div style={{ minWidth: minimo, height: alto }}>
-        <ParentSize debounceTime={50}>
-          {({ width }) =>
-            width > 0 ? (
-              <Lienzo {...{ xs, ys, celdas, tipo, nombre, formatoValor, sumable, anchoY, altoCelda, width, height: alto }} />
-            ) : null
-          }
-        </ParentSize>
+    <figure aria-label={etiqueta} className="m-0 w-full min-w-0">
+      <div className="overflow-x-auto pb-1">
+        <div style={{ minWidth: minimo, height: alto }}>
+          <ParentSize debounceTime={50}>
+            {({ width }) =>
+              width > 0 ? (
+                <Lienzo {...{ xs, ys, celdas, tipo, nombre, formatoValor, sumable, anchoY, altoCelda, width, height: alto }} />
+              ) : null
+            }
+          </ParentSize>
+        </div>
       </div>
       <Escala tipo={tipo} celdas={celdas} formatoValor={formatoValor} />
     </figure>
