@@ -600,7 +600,7 @@ function Pestanas({ vistas, activa }: { vistas: typeof VISTAS; activa: Vista }) 
         <TabsTrigger
           key={id}
           value={id}
-          className="h-10 flex-none rounded-none border-0 px-1 text-[13px] text-muted-foreground after:hidden hover:text-foreground data-active:text-foreground dark:data-active:border-transparent"
+          className="h-10 flex-none rounded-md border-0 px-1 text-[13px] focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none text-muted-foreground after:hidden hover:text-foreground data-active:text-foreground dark:data-active:border-transparent"
         >
           <Icono aria-hidden /> {texto}
           {activa === id && (
