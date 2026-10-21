@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { ThinkingPromptInput, type ThinkingStatus, type ThinkingStep } from "@/components/ui/thinking-prompt-input";
 import { useDash } from "@/components/Contexto";
 import { useNube } from "@/components/nube/contexto-nube";
-import { describirPaso, describirTabla, ejecutar, type Contexto } from "@/lib/asistente/herramientas";
-import { correrTurno, transcribir, type Mensaje } from "@/lib/asistente/cliente";
-import { grabar, hablar, type Grabacion } from "@/lib/asistente/audio";
+import { describirPaso, describirTabla, ejecutar, separarVisualizacion, type Contexto, type Visualizacion as Spec } from "@/lib/asistente/herramientas";
+import { correrTurno, transcribir, type Mensaje, type OpcionesVoz } from "@/lib/asistente/cliente";
+import { calentarVoz, crearLocutor, grabar, type Grabacion } from "@/lib/asistente/audio";
+import { Visualizacion } from "./Visualizacion";
 
 const ETIQUETAS = {
   thinking: "Pensando",
@@ -27,11 +28,18 @@ const ETIQUETAS = {
 const SUGERENCIAS = [
   "¿Qué región tiene el mayor monto total?",
   "¿Cómo evolucionó el monto por mes?",
+  "Hazme un gráfico del monto por segmento",
   "Muéstrame solo los créditos en mora",
 ];
 
-type Turno = { status: ThinkingStatus; prompt: string; steps: ThinkingStep[]; answer: string; nota?: string };
-const VACIO: Turno = { status: "idle", prompt: "", steps: [], answer: "" };
+/** Máximo de gráficos o tablas por respuesta. */
+const MAX_VISUALES = 4;
+
+/** Marcador de la pregunta por voz mientras llega su transcripción. */
+const PREGUNTA_VOZ = "(pregunta por voz)";
+
+type Turno = { status: ThinkingStatus; prompt: string; steps: ThinkingStep[]; answer: string; nota?: string; visuales: Spec[] };
+const VACIO: Turno = { status: "idle", prompt: "", steps: [], answer: "", visuales: [] };
 
 export function Asistente() {
   const dash = useDash();
@@ -49,6 +57,18 @@ export function Asistente() {
   const cancelador = useRef<AbortController | null>(null);
   const grabacion = useRef<Grabacion | null>(null);
   const inicio = useRef(0);
+  /** Tiempos del turno de voz (ms desde que el usuario terminó de hablar). */
+  const tiempos = useRef<{ t0: number; marcas: Record<string, number> } | null>(null);
+  const marcar = useCallback((nombre: string) => {
+    const t = tiempos.current;
+    if (t && t.marcas[nombre] === undefined) t.marcas[nombre] = Math.round(performance.now() - t.t0);
+  }, []);
+  const reportar = useCallback(() => {
+    const t = tiempos.current;
+    if (!t || process.env.NODE_ENV !== "development") return;
+    (window as unknown as { __tiemposAsistente?: Record<string, number> }).__tiemposAsistente = { ...t.marcas };
+    console.info("[asistente] tiempos de voz (ms desde que terminaste de hablar)", t.marcas);
+  }, []);
 
   // Estado más reciente del dashboard para las herramientas (cambia al aplicar filtros).
   const ultimo = useRef(dash);
@@ -88,7 +108,7 @@ export function Asistente() {
         e.preventDefault();
         setAbierto((a) => !a);
       }
-      if (e.key === "Escape") setAbierto(false);
+      if (e.key === "Escape" && !document.querySelector("[data-slot=dialog-content]")) setAbierto(false);
     };
     window.addEventListener("keydown", tecla);
     return () => window.removeEventListener("keydown", tecla);
@@ -114,15 +134,17 @@ export function Asistente() {
   }, [microfono]);
 
   const preguntar = useCallback(
-    async (pregunta: string, opciones: { think: boolean; porVoz?: boolean; controlador?: AbortController }) => {
+    async (pregunta: string, opciones: { think: boolean; porVoz?: boolean; controlador?: AbortController; voz?: OpcionesVoz }) => {
       const ctx = contexto();
       if (!ctx) return;
       const controlador = opciones.controlador ?? new AbortController();
       cancelador.current = controlador;
       inicio.current = Date.now();
       setSegundos(0);
-      setTurno({ status: "thinking", prompt: pregunta, steps: [{ id: "leer", text: "Leyendo tu pregunta…", status: "active" }], answer: "" });
+      setTurno({ status: "thinking", prompt: pregunta === PREGUNTA_VOZ ? "🎙️ Mensaje de voz" : pregunta, steps: [{ id: "leer", text: pregunta === PREGUNTA_VOZ ? "Escuchando y consultando los datos…" : "Leyendo tu pregunta…", status: "active" }], answer: "", visuales: [] });
       const pasos: ThinkingStep[] = [{ id: "leer", text: "Leyendo tu pregunta…", status: "complete" }];
+      // Por voz, la respuesta empieza a sonar mientras todavía se está escribiendo.
+      const locutor = opciones.porVoz && vozActiva ? crearLocutor(controlador.signal, () => { setHablando(true); marcar("empieza_a_hablar"); }) : null;
       try {
         const { historial: nuevo, respuesta } = await correrTurno(
           [...historial.current, { role: "user", content: pregunta }],
@@ -133,33 +155,48 @@ export function Asistente() {
               ? { ...t, steps: [...t.steps.map((s) => ({ ...s, status: "complete" as const })), { id: "razonar", text: "Razonando la respuesta…", status: "active" }] }
               : t)),
             onHerramienta: (nombre, args) => {
+              marcar("primera_herramienta");
               pasos.forEach((p) => (p.status = "complete"));
               pasos.push({ id: `${nombre}-${pasos.length}`, text: describirPaso(nombre, args), status: "active" });
-              setTurno((t) => ({ ...t, steps: [...pasos] }));
-              return ejecutar(nombre, args, contexto() ?? ctx);
+              const { paraModelo, visualizacion } = separarVisualizacion(ejecutar(nombre, args, contexto() ?? ctx));
+              setTurno((t) => {
+                if (!visualizacion) return { ...t, steps: [...pasos] };
+                // Sin duplicados (el modelo a veces repite la llamada) y con un máximo por respuesta.
+                const clave = JSON.stringify(visualizacion);
+                const visuales = t.visuales.some((v) => JSON.stringify(v) === clave) ? t.visuales : [...t.visuales, visualizacion].slice(-MAX_VISUALES);
+                return { ...t, steps: [...pasos], visuales };
+              });
+              return paraModelo;
             },
-            onTexto: (texto) => setTurno((t) => ({ ...t, status: "answering", answer: texto, steps: t.steps.map((s) => ({ ...s, status: "complete" as const })) })),
+            onTexto: (crudo, ronda) => {
+              marcar("primer_texto");
+              const texto = crudo.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trimStart();
+              if (ronda > 0) locutor?.actualizar(texto);
+              setTurno((t) => ({ ...t, status: "answering", answer: texto, steps: t.steps.map((s) => ({ ...s, status: "complete" as const })) }));
+            },
           },
           controlador.signal,
+          opciones.voz,
         );
+        marcar("respuesta_completa");
         historial.current = nuevo.slice(-30);
         setSegundos(Math.round((Date.now() - inicio.current) / 1000));
         setTurno((t) => ({ ...t, status: "done", answer: respuesta || "No encontré una respuesta para eso.", steps: pasos.length > 1 ? pasos.map((p) => ({ ...p, status: "complete" as const })) : [] }));
-        if (opciones.porVoz && vozActiva && respuesta) {
-          setHablando(true);
-          await hablar(respuesta, controlador.signal);
+        if (locutor && respuesta) {
+          await locutor.terminar(respuesta);
           setHablando(false);
         }
+        if (opciones.porVoz) reportar();
       } catch (e) {
         setHablando(false);
         if (controlador.signal.aborted) {
           setTurno((t) => ({ ...t, status: "done", answer: t.answer || "Detuviste la respuesta.", steps: t.steps.map((s) => ({ ...s, status: "complete" as const })) }));
           return;
         }
-        setTurno((t) => ({ ...t, status: "done", answer: e instanceof Error ? e.message : "El asistente no pudo responder.", nota: "Puedes intentarlo de nuevo.", steps: [] }));
+        setTurno((t) => ({ ...t, status: "done", answer: e instanceof Error ? e.message : "El asistente no pudo responder.", nota: "Puedes intentarlo de nuevo.", steps: [], visuales: [] }));
       }
     },
-    [contexto, vozActiva],
+    [contexto, vozActiva, marcar, reportar],
   );
 
   const detener = useCallback(() => {
@@ -167,37 +204,69 @@ export function Asistente() {
     setHablando(false);
   }, []);
 
+  /** Turno por voz: audio WAV (base64) → transcripción → respuesta → voz. */
+  const procesarVoz = useCallback(
+    async (audioListo: Promise<string>) => {
+      tiempos.current = { t0: performance.now(), marcas: {} };
+      setMicrofono("procesando");
+      const controlador = new AbortController();
+      cancelador.current = controlador;
+      inicio.current = Date.now();
+      setTurno({ status: "thinking", prompt: "🎙️ Mensaje de voz", steps: [{ id: "oir", text: "Escuchando tu pregunta…", status: "active" }], answer: "", visuales: [] });
+      try {
+        const audio = await audioListo;
+        marcar("audio_listo");
+        const pistas = vocabulario();
+        // La transcripción corre en paralelo: solo sirve para mostrar el texto y guardar el historial.
+        const transcripcion: { texto: string | null } = { texto: null };
+        void transcribir(audio, pistas, controlador.signal)
+          .then((texto) => {
+            marcar("transcrito");
+            transcripcion.texto = texto;
+            setTurno((t) => (t.prompt.startsWith("🎙️") ? { ...t, prompt: `🎙️ ${texto}` } : t));
+            // Si el turno ya terminó, la pregunta queda en el historial como texto.
+            historial.current = historial.current.map((m) => (m.role === "user" && m.content === PREGUNTA_VOZ ? { ...m, content: texto } : m));
+          })
+          .catch(() => {});
+        setMicrofono("listo");
+        await preguntar(PREGUNTA_VOZ, { think, porVoz: true, controlador, voz: { audio, pistas, transcripcion } });
+      } catch (e) {
+        setMicrofono("listo");
+        if (controlador.signal.aborted) return setTurno(VACIO);
+        const mensaje = e instanceof Error && e.message !== "corto" ? e.message : "El audio fue muy corto. Mantén el micrófono activo mientras hablas.";
+        setTurno({ status: "done", prompt: "🎙️ Mensaje de voz", steps: [], answer: mensaje, visuales: [] });
+      }
+    },
+    [marcar, preguntar, think, vocabulario],
+  );
+
+  // Solo en desarrollo: permite medir el flujo de voz inyectando un WAV, sin micrófono.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const w = window as unknown as { __probarVoz?: (audio: string) => Promise<void> };
+    w.__probarVoz = (audio) => procesarVoz(Promise.resolve(audio));
+    return () => {
+      delete w.__probarVoz;
+    };
+  }, [procesarVoz]);
+
   const alternarMicrofono = useCallback(async () => {
     if (microfono === "grabando") {
       const g = grabacion.current;
       grabacion.current = null;
       if (!g) return;
-      setMicrofono("procesando");
-      const controlador = new AbortController();
-      cancelador.current = controlador;
-      inicio.current = Date.now();
-      setTurno({ status: "thinking", prompt: "🎙️ Mensaje de voz", steps: [{ id: "oir", text: "Escuchando tu pregunta…", status: "active" }], answer: "" });
-      try {
-        const audio = await g.detener();
-        const texto = await transcribir(audio, vocabulario(), controlador.signal);
-        setMicrofono("listo");
-        await preguntar(texto, { think, porVoz: true, controlador });
-      } catch (e) {
-        setMicrofono("listo");
-        if (controlador.signal.aborted) return setTurno(VACIO);
-        const mensaje = e instanceof Error && e.message !== "corto" ? e.message : "El audio fue muy corto. Mantén el micrófono activo mientras hablas.";
-        setTurno({ status: "done", prompt: "🎙️ Mensaje de voz", steps: [], answer: mensaje });
-      }
+      await procesarVoz(g.detener());
       return;
     }
     detener();
     try {
       grabacion.current = await grabar(() => void alternarMicrofonoRef.current());
       setMicrofono("grabando");
+      calentarVoz();
     } catch (e) {
-      setTurno({ status: "done", prompt: "🎙️ Mensaje de voz", steps: [], answer: e instanceof Error ? e.message : "No pude usar el micrófono." });
+      setTurno({ status: "done", prompt: "🎙️ Mensaje de voz", steps: [], answer: e instanceof Error ? e.message : "No pude usar el micrófono.", visuales: [] });
     }
-  }, [microfono, preguntar, think, detener, vocabulario]);
+  }, [microfono, procesarVoz, detener]);
   const alternarMicrofonoRef = useRef(alternarMicrofono);
   useEffect(() => {
     alternarMicrofonoRef.current = alternarMicrofono;
@@ -274,7 +343,7 @@ export function Asistente() {
                 {turno.status === "idle" && (
                   <div className="mb-4 flex flex-1 flex-col justify-end gap-3">
                     <p className="text-[15px] font-medium">Pregúntale a tus datos, por escrito o por voz.</p>
-                    <p className="text-[13px] text-muted-foreground">Calculo con los mismos datos y filtros que ves en el dashboard, y puedo filtrar los gráficos por ti.</p>
+                    <p className="text-[13px] text-muted-foreground">Calculo con los mismos datos y filtros que ves en el dashboard, filtro los gráficos por ti y creo gráficos o tablas cuando me los pidas.</p>
                     <div className="flex flex-col items-start gap-1.5">
                       {SUGERENCIAS.map((s) => (
                         <button key={s} type="button" onClick={() => void preguntar(s, { think })} className="rounded-full border border-border bg-card px-3 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground">
@@ -300,6 +369,11 @@ export function Asistente() {
                   followUpPlaceholder="Haz otra pregunta"
                   labels={ETIQUETAS}
                   accessory={botonMicrofono}
+                  answerAddon={turno.visuales.length > 0 && (
+                    <div className="space-y-3 pt-1">
+                      {turno.visuales.map((v, i) => <Visualizacion key={`${i}-${v.titulo}`} v={v} />)}
+                    </div>
+                  )}
                   disabled={microfono === "procesando"}
                 />
               </div>

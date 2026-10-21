@@ -33,6 +33,11 @@ export const FRECUENCIA = 22050;
 let cliente: grpc.Client | null = null;
 const conectar = () => (cliente ??= new grpc.Client(SERVIDOR, grpc.credentials.createSsl()));
 
+/** Abre la conexión TLS con NVIDIA de antemano (mientras el usuario habla), para que la primera frase suene antes. */
+export function calentar(): Promise<void> {
+  return new Promise((ok) => conectar().waitForReady(Date.now() + 5000, () => ok()));
+}
+
 /** Devuelve PCM lineal de 16 bits mono a 22,05 kHz para el texto dado. */
 export function sintetizar(texto: string, senal?: AbortSignal): Promise<Buffer> {
   const key = process.env.NVIDIA_API_KEY;

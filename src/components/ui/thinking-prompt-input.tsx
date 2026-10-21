@@ -51,6 +51,8 @@ export type ThinkingPromptInputProps = {
   labels?: Partial<ThinkingLabels>;
   /** Extra controls next to the Think toggle (e.g. a microphone button). */
   accessory?: React.ReactNode;
+  /** Extra content rendered below the answer text (e.g. charts or tables). */
+  answerAddon?: React.ReactNode;
 };
 
 const EMPTY_STEPS: ThinkingStep[] = [];
@@ -74,6 +76,7 @@ export function ThinkingPromptInput({
   placeholder = "Ask anything",
   followUpPlaceholder = "Ask a follow-up",
   answerNote,
+  answerAddon,
   disabled = false,
   className = "",
   labels: labelOverrides,
@@ -279,6 +282,7 @@ export function ThinkingPromptInput({
                     <p key={index}>{paragraph}{status === "answering" && index === paragraphs.length - 1 && <span data-cursor aria-hidden="true" className="ml-1 inline-block h-3.5 w-1 translate-y-0.5 rounded-full bg-primary motion-safe:animate-pulse" />}</p>
                   ))}
                   {status === "answering" && paragraphs.length === 0 && <span data-cursor aria-hidden="true" className="inline-block h-3.5 w-1 rounded-full bg-primary motion-safe:animate-pulse" />}
+                  {answerAddon}
                   {answerNote && status === "done" && <p className="text-[11px] leading-4 text-muted-foreground">{answerNote}</p>}
                 </div>
               )}
