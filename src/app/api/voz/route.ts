@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { aWav, sintetizar } from "@/lib/servidor/riva";
+import { aWav, calentar, sintetizar } from "@/lib/servidor/riva";
 import { usuarioActual } from "@/lib/servidor/sesion";
 
 export const maxDuration = 30;
 
-const entrada = z.object({ texto: z.string().trim().min(1).max(600) });
+const entrada = z.union([z.object({ calentar: z.literal(true) }), z.object({ texto: z.string().trim().min(1).max(600) })]);
 
 /** Texto → audio WAV con la voz Isabela (Magpie TTS de NVIDIA). El cliente pide una oración a la vez. */
 export async function POST(request: Request) {
@@ -13,9 +13,13 @@ export async function POST(request: Request) {
   if (yo.estado !== "activo") return Response.json({ error: "Tu cuenta está suspendida." }, { status: 403 });
   const datos = entrada.safeParse(await request.json().catch(() => null));
   if (!datos.success) return Response.json({ error: "Texto no válido." }, { status: 400 });
+  if ("calentar" in datos.data) {
+    await calentar();
+    return new Response(null, { status: 204 });
+  }
   try {
     // Lectura en voz alta: los símbolos se pronuncian mejor escritos.
-    const texto = datos.data.texto.replace(/%/g, " por ciento").replace(/\bUF\b/g, "U F").replace(/[*_#`]/g, "");
+    const texto = (datos.data as { texto: string }).texto.replace(/%/g, " por ciento").replace(/\bUF\b/g, "U F").replace(/[*_#`]/g, "");
     const pcm = await sintetizar(texto, request.signal);
     return new Response(new Uint8Array(aWav(pcm)), { headers: { "Content-Type": "audio/wav", "Cache-Control": "no-store" } });
   } catch (e) {

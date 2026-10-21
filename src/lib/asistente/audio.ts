@@ -115,7 +115,7 @@ export function oraciones(texto: string): string[] {
 }
 
 /** Lee la respuesta en voz alta con Isabela: pide cada oración a /api/voz y las reproduce en orden. */
-export function hablar(texto: string, senal: AbortSignal): Promise<void> {
+export function hablar(texto: string, senal: AbortSignal, alEmpezar?: () => void): Promise<void> {
   const partes = oraciones(texto).slice(0, 12);
   // Se piden todas en paralelo (la primera llega antes) y se reproducen en orden.
   const audios = partes.map((p) =>
@@ -134,6 +134,7 @@ export function hablar(texto: string, senal: AbortSignal): Promise<void> {
           audio.onended = () => ok();
           audio.onerror = () => ok();
           senal.addEventListener("abort", () => { audio.pause(); ok(); }, { once: true });
+          audio.onplaying = () => alEmpezar?.();
           void audio.play().catch(() => ok());
         });
       } finally {
@@ -141,4 +142,79 @@ export function hablar(texto: string, senal: AbortSignal): Promise<void> {
       }
     }
   })();
+}
+
+/** Abre la conexión de voz en el servidor mientras el usuario habla (ahorra el saludo TLS en la primera frase). */
+export function calentarVoz(): void {
+  void fetch("/api/voz", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ calentar: true }) }).catch(() => {});
+}
+
+export interface Locutor {
+  /** Recibe el texto acumulado de la respuesta; sintetiza los trozos que ya están completos. */
+  actualizar: (textoCompleto: string) => void;
+  /** La respuesta terminó: sintetiza lo que falta y espera a que termine de sonar. */
+  terminar: (textoFinal: string) => Promise<void>;
+}
+
+/**
+ * Lee la respuesta mientras se genera. El primer trozo se corta en la primera coma o punto
+ * (desde ~5 palabras) para que empiece a sonar cuanto antes; los siguientes van por oración.
+ */
+export function crearLocutor(senal: AbortSignal, alEmpezar?: () => void): Locutor {
+  let enviado = 0; // caracteres ya enviados a sintetizar
+  const cola: Promise<Blob | null>[] = [];
+  let reproduciendo: Promise<void> = Promise.resolve();
+
+  const sintetizar = (trozo: string) => {
+    const limpio = trozo.trim();
+    if (limpio.length < 2) return;
+    const audio = fetch("/api/voz", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: limpio }), signal: senal })
+      .then((r) => (r.ok ? r.blob() : null))
+      .catch(() => null);
+    cola.push(audio);
+    reproduciendo = reproduciendo.then(async () => {
+      const blob = await audio;
+      if (!blob || senal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      const el = new Audio(url);
+      try {
+        await new Promise<void>((ok) => {
+          el.onended = () => ok();
+          el.onerror = () => ok();
+          el.onplaying = () => alEmpezar?.();
+          senal.addEventListener("abort", () => { el.pause(); ok(); }, { once: true });
+          void el.play().catch(() => ok());
+        });
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    });
+  };
+
+  const siguienteCorte = (texto: string): number => {
+    const resto = texto.slice(enviado);
+    const primero = enviado === 0;
+    const patron = primero ? /[,.;:!?](\s|$)/g : /[.!?](\s|$)/g;
+    let m: RegExpExecArray | null;
+    while ((m = patron.exec(resto))) {
+      const fin = m.index + 1;
+      if (!primero || resto.slice(0, fin).trim().split(/\s+/).length >= 5) return enviado + fin;
+    }
+    return -1;
+  };
+
+  return {
+    actualizar: (texto) => {
+      if (senal.aborted) return;
+      for (let corte = siguienteCorte(texto); corte > 0; corte = siguienteCorte(texto)) {
+        sintetizar(texto.slice(enviado, corte));
+        enviado = corte;
+      }
+    },
+    terminar: async (texto) => {
+      if (!senal.aborted && enviado < texto.length) sintetizar(texto.slice(enviado));
+      enviado = texto.length;
+      await reproduciendo;
+    },
+  };
 }

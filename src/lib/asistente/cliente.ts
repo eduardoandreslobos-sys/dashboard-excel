@@ -14,8 +14,8 @@ export interface LlamadaHerramienta {
 }
 
 interface Eventos {
-  /** Texto de la respuesta (acumulado). */
-  onTexto: (texto: string) => void;
+  /** Texto de la respuesta (acumulado) y la vuelta en que llegó (la 0 nunca es la final). */
+  onTexto: (texto: string, ronda: number) => void;
   /** Empieza una herramienta: devuelve su resultado (ya ejecutado). */
   onHerramienta: (nombre: string, args: Record<string, unknown>) => unknown;
   /** El modelo está razonando (modo Think). */
@@ -33,7 +33,7 @@ async function leerError(r: Response): Promise<string> {
 }
 
 /** Lee el stream SSE de una ronda: devuelve el texto y las llamadas a herramientas pedidas. */
-async function leerRonda(r: Response, ev: Eventos, textoPrevio: string): Promise<{ texto: string; llamadas: LlamadaHerramienta[] }> {
+async function leerRonda(r: Response, ev: Eventos, ronda: number): Promise<{ texto: string; llamadas: LlamadaHerramienta[] }> {
   const lector = r.body!.getReader();
   const decodificador = new TextDecoder();
   let buffer = "";
@@ -64,7 +64,7 @@ async function leerRonda(r: Response, ev: Eventos, textoPrevio: string): Promise
       if (delta.reasoning_content || delta.reasoning) ev.onRazonando?.();
       if (delta.content) {
         texto += delta.content;
-        ev.onTexto(textoPrevio + texto);
+        ev.onTexto(texto, ronda);
       }
       for (const tc of delta.tool_calls ?? []) {
         const i = tc.index ?? 0;
@@ -82,23 +82,38 @@ async function leerRonda(r: Response, ev: Eventos, textoPrevio: string): Promise
  * Corre un turno completo. Devuelve el historial actualizado (con las herramientas usadas)
  * y el texto final. Lanza Error con un mensaje en español si algo falla.
  */
+export interface OpcionesVoz {
+  /** Audio WAV (base64) de la pregunta: se envía mientras no llegue la transcripción. */
+  audio: string;
+  pistas: string;
+  /** Se completa en paralelo; cuando llega, reemplaza al audio en el historial. */
+  transcripcion: { texto: string | null };
+}
+
 export async function correrTurno(
   historial: Mensaje[],
   contexto: string,
   think: boolean,
   ev: Eventos,
   senal: AbortSignal,
+  voz?: OpcionesVoz,
 ): Promise<{ historial: Mensaje[]; respuesta: string }> {
   const mensajes = [...historial];
+  const indicePregunta = mensajes.length - 1;
   for (let ronda = 0; ronda < MAX_RONDAS; ronda++) {
+    const conTexto = voz?.transcripcion.texto;
+    if (conTexto) mensajes[indicePregunta] = { role: "user", content: conTexto };
     const r = await fetch("/api/asistente", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ modo: "chat", mensajes, contexto, think }),
+      body: JSON.stringify({
+        modo: "chat", mensajes, contexto, think, ronda,
+        ...(voz ? { porVoz: true, pistas: voz.pistas, ...(conTexto ? {} : { audio: voz.audio }) } : {}),
+      }),
       signal: senal,
     });
     if (!r.ok) throw new Error(await leerError(r));
-    const { texto, llamadas } = await leerRonda(r, ev, "");
+    const { texto, llamadas } = await leerRonda(r, ev, ronda);
     // Algunos modelos dejan el razonamiento en <think>…</think> dentro del contenido.
     const limpio = texto.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
     if (!llamadas.length) {
