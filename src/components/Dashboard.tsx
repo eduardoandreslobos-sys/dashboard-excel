@@ -46,6 +46,7 @@ import { subirExcel } from "@/lib/nube";
 import { confirmarReemplazo, prepararReemplazo } from "@/lib/servidor/dashboards";
 import type { ConfigDashboard } from "@/lib/tipos";
 import { BarraNube } from "./nube/BarraNube";
+import { Asistente } from "./asistente/Asistente";
 import { ProveedorNube, useNube, type DatosNube } from "./nube/contexto-nube";
 
 const VISTAS: { id: Vista; texto: string; icono: typeof LayoutDashboard }[] = [
@@ -737,6 +738,7 @@ function Contenido() {
         )}
       </main>
       <Paleta abierta={paleta} setAbierta={setPaleta} subir={subir} prefs={prefs} />
+      <Asistente />
       <Toaster theme={prefs.tema} position="bottom-right" richColors={false} closeButton />
       <AnimatePresence>
         {arrastrando && (

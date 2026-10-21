@@ -6,6 +6,28 @@ import { ArrowUp, Check, ChevronRight, Sparkles, Square } from "lucide-react";
 export type ThinkingStatus = "idle" | "thinking" | "answering" | "done";
 export type ThinkingStep = { id: string; text: string; status?: "active" | "complete" };
 export type ThinkingSubmitOptions = { think: boolean };
+export type ThinkingLabels = {
+  thinking: string;
+  thoughtFor: (seconds: number) => string;
+  think: string;
+  send: string;
+  stop: string;
+  conversation: string;
+  response: string;
+  complete: string;
+  inProgress: string;
+};
+const DEFAULT_LABELS: ThinkingLabels = {
+  thinking: "Thinking it through",
+  thoughtFor: (seconds) => `Thought for ${seconds}s`,
+  think: "Think",
+  send: "Send prompt",
+  stop: "Stop",
+  conversation: "Conversation",
+  response: "Response",
+  complete: "Complete",
+  inProgress: "In progress",
+};
 export type ThinkingPromptInputProps = {
   status?: ThinkingStatus;
   prompt?: string;
@@ -25,6 +47,10 @@ export type ThinkingPromptInputProps = {
   answerNote?: string;
   disabled?: boolean;
   className?: string;
+  /** Texts for localization (defaults in English). */
+  labels?: Partial<ThinkingLabels>;
+  /** Extra controls next to the Think toggle (e.g. a microphone button). */
+  accessory?: React.ReactNode;
 };
 
 const EMPTY_STEPS: ThinkingStep[] = [];
@@ -50,7 +76,10 @@ export function ThinkingPromptInput({
   answerNote,
   disabled = false,
   className = "",
+  labels: labelOverrides,
+  accessory,
 }: ThinkingPromptInputProps) {
+  const labels = { ...DEFAULT_LABELS, ...labelOverrides };
   const [draft, setDraft] = React.useState(defaultValue);
   const [localThink, setLocalThink] = React.useState(defaultThink);
   const [expanded, setExpanded] = React.useState(false);
@@ -207,7 +236,7 @@ export function ThinkingPromptInput({
   return (
     <div data-slot="thinking-prompt-input" data-state={status} className={`flex h-full min-h-0 w-full max-w-[480px] flex-col text-foreground ${className}`}>
       {status !== "idle" && (
-        <div ref={transcript} data-transcript role="region" aria-label="Conversation" tabIndex={0} className="mb-4 min-h-0 flex-1 overflow-y-auto rounded-lg outline-none [overflow-anchor:none] focus-visible:ring-2 focus-visible:ring-ring">
+        <div ref={transcript} data-transcript role="region" aria-label={labels.conversation} tabIndex={0} className="mb-4 min-h-0 flex-1 overflow-y-auto rounded-lg outline-none [overflow-anchor:none] focus-visible:ring-2 focus-visible:ring-ring">
           <div ref={transcriptBody} className="space-y-5 px-1 py-1">
             <div ref={question} data-question className="ml-auto w-fit max-w-[94%] origin-top-left rounded-2xl rounded-br-sm bg-muted px-3.5 py-2.5 text-[13px] leading-5 text-foreground">
               <p className="break-words">{prompt}</p>
@@ -226,8 +255,8 @@ export function ThinkingPromptInput({
                   >
                     <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                     {status === "thinking" ? (
-                      <span ref={shimmer} data-shimmer className={reduced ? "text-muted-foreground" : "bg-[linear-gradient(90deg,var(--color-muted-foreground)_0%,var(--color-muted-foreground)_42%,var(--color-foreground)_50%,var(--color-muted-foreground)_58%,var(--color-muted-foreground)_100%)] bg-[length:250%_100%] bg-clip-text text-transparent"}>Thinking it through</span>
-                    ) : <span>Thought for {seconds}s</span>}
+                      <span ref={shimmer} data-shimmer className={reduced ? "text-muted-foreground" : "bg-[linear-gradient(90deg,var(--color-muted-foreground)_0%,var(--color-muted-foreground)_42%,var(--color-foreground)_50%,var(--color-muted-foreground)_58%,var(--color-muted-foreground)_100%)] bg-[length:250%_100%] bg-clip-text text-transparent"}>{labels.thinking}</span>
+                    ) : <span>{labels.thoughtFor(seconds)}</span>}
                     {status === "thinking" ? <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">{seconds}s</span> : <ChevronRight className={`size-3.5 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`} aria-hidden="true" />}
                   </button>
                   <div id={regionId} data-reasoning hidden={!open} className="pt-3">
@@ -235,7 +264,7 @@ export function ThinkingPromptInput({
                       {steps.map((step) => (
                         <li key={step.id} data-step={step.id} className="relative flex min-h-9 items-center gap-3 py-2 text-xs leading-5">
                           <span className="absolute -left-[26px] flex size-[11px] items-center justify-center rounded-full bg-background ring-4 ring-background">
-                            {step.status === "complete" ? <Check className="size-3 text-foreground" aria-label="Complete" /> : <span className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse" aria-label="In progress" />}
+                            {step.status === "complete" ? <Check className="size-3 text-foreground" aria-label={labels.complete} /> : <span className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse" aria-label={labels.inProgress} />}
                           </span>
                           <span className={step.status === "active" ? "text-foreground" : "text-muted-foreground"}>{step.text}</span>
                         </li>
@@ -245,7 +274,7 @@ export function ThinkingPromptInput({
                 </>
               )}
               {(status === "answering" || status === "done") && (
-                <div data-answer role="region" aria-label="Response" aria-live="off" className="mt-4 space-y-2.5 break-words text-sm leading-6 text-foreground">
+                <div data-answer role="region" aria-label={labels.response} aria-live="off" className="mt-4 space-y-2.5 break-words text-sm leading-6 text-foreground">
                   {paragraphs.map((paragraph, index) => (
                     <p key={index}>{paragraph}{status === "answering" && index === paragraphs.length - 1 && <span data-cursor aria-hidden="true" className="ml-1 inline-block h-3.5 w-1 translate-y-0.5 rounded-full bg-primary motion-safe:animate-pulse" />}</p>
                   ))}
@@ -275,6 +304,7 @@ export function ThinkingPromptInput({
           className="block h-16 min-h-16 w-full resize-none rounded-lg bg-transparent p-1 text-[17px] leading-7 tracking-tight text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
         />
         <div className="mt-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
           <button
             type="button"
             aria-pressed={thinkingEnabled}
@@ -286,13 +316,15 @@ export function ThinkingPromptInput({
             className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${thinkingEnabled ? "border-primary/15 bg-primary/5 text-foreground" : "border-border bg-card text-muted-foreground"}`}
           >
             <Sparkles className="size-3.5" aria-hidden="true" />
-            Think
+            {labels.think}
             {thinkingEnabled && <Check className="size-3" aria-hidden="true" />}
           </button>
+          {accessory}
+          </div>
           <button
             type={busy ? "button" : "submit"}
             data-stop={busy ? "" : undefined}
-            aria-label={busy ? "Stop" : "Send prompt"}
+            aria-label={busy ? labels.stop : labels.send}
             onClick={busy ? (event) => { event.preventDefault(); onStop?.(); } : undefined}
             disabled={disabled || (busy ? !onStop : !inputValue.trim() || !onSubmit)}
             className="relative inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-30"
@@ -302,7 +334,7 @@ export function ThinkingPromptInput({
           </button>
         </div>
       </form>
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-announcement>{status === "thinking" ? `Thinking. ${steps.at(-1)?.text ?? ""}` : completeAnswer}</div>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-announcement>{status === "thinking" ? `${labels.thinking}. ${steps.at(-1)?.text ?? ""}` : completeAnswer}</div>
     </div>
   );
 }
